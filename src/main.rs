@@ -23,9 +23,12 @@ fn run_executable(executable: impl AsRef<OsStr>, args: impl IntoIterator<Item = 
 
 fn get_style_names(clang_format_executable: impl AsRef<OsStr>) -> Box<[String]> {
     let help_text = run_executable(clang_format_executable, &["--help"]);
-    let regex = Regex::new(r"^\s*(\w+(?:, \w+)*)\.$").unwrap();
+    let style_list_regex = Regex::new(r"^\s*(\w+(?:, \w+)*)\.$").unwrap();
 
-    let mut result = help_text.lines().find_map(|line| regex.captures(line)).unwrap()[1]
+    let mut result = help_text
+        .lines()
+        .find_map(|line| style_list_regex.captures(line))
+        .unwrap()[1]
         .split(", ")
         .map(str::to_string)
         .collect::<Box<_>>();
@@ -36,7 +39,7 @@ fn get_style_names(clang_format_executable: impl AsRef<OsStr>) -> Box<[String]> 
 }
 
 fn parse_single_config(config_text: &str) -> YamlHash {
-    YamlLoader::load_from_str(&config_text)
+    YamlLoader::load_from_str(config_text)
         .unwrap()
         .pop()
         .and_then(Yaml::into_hash)
@@ -49,21 +52,32 @@ fn get_style_config(clang_format_executable: impl AsRef<OsStr>, style: &str) -> 
     parse_single_config(&config_text)
 }
 
-fn merge_yaml_hash(hash: &YamlHash, base_hash: &YamlHash) -> YamlHash {
+fn simplify_yaml_hash(hash: &YamlHash, base_hash: &YamlHash) -> YamlHash {
     hash.iter()
         .filter_map(|(key, value)| {
             base_hash
                 .get(key)
                 .map_or_else(
-                    || Some(value.clone()),
+                    || {
+                        value.as_hash().map_or_else(
+                            || Some(value.clone()),
+                            |value_hash| {
+                                if value_hash.is_empty() {
+                                    None
+                                } else {
+                                    Some(Yaml::Hash(value_hash.clone()))
+                                }
+                            },
+                        )
+                    },
                     |base_value| {
                         if let Yaml::Hash(value_hash) = value {
-                            let merged_hash = merge_yaml_hash(value_hash, base_value.as_hash().unwrap());
+                            let simplified_hash = simplify_yaml_hash(value_hash, base_value.as_hash().unwrap());
 
-                            if merged_hash.is_empty() {
+                            if simplified_hash.is_empty() {
                                 None
                             } else {
-                                Some(Yaml::Hash(merged_hash))
+                                Some(Yaml::Hash(simplified_hash))
                             }
                         } else if base_value == value {
                             None
@@ -72,7 +86,7 @@ fn merge_yaml_hash(hash: &YamlHash, base_hash: &YamlHash) -> YamlHash {
                         }
                     },
                 )
-                .map(|merged_value| (key.clone(), merged_value))
+                .map(|simplified_value| (key.clone(), simplified_value))
         })
         .collect()
 }
@@ -81,7 +95,7 @@ fn simplify_single_config(config: &YamlHash, style_name: String, style_config: &
     let mut simplified_config =
         iter::once((Yaml::String(BASED_ON_STYLE.to_string()), Yaml::String(style_name))).collect::<YamlHash>();
 
-    simplified_config.extend(merge_yaml_hash(config, style_config));
+    simplified_config.extend(simplify_yaml_hash(config, style_config));
 
     simplified_config
 }
@@ -92,7 +106,7 @@ fn simplify_config(config: YamlHash, styles: impl IntoIterator<Item = (String, Y
     } else {
         styles
             .into_iter()
-            .map(|(name, style_config)| simplify_single_config(&config, name, &style_config))
+            .map(|(style_name, style_config)| simplify_single_config(&config, style_name, &style_config))
             .min_by_key(YamlHash::len)
             .unwrap()
     }
@@ -120,9 +134,9 @@ fn main() {
     let simplified_config = simplify_config(
         config,
         style_names.into_vec().into_iter().map(|style_name| {
-            let style = get_style_config(&clang_format_executable, &style_name);
+            let style_config = get_style_config(&clang_format_executable, &style_name);
 
-            (style_name, style)
+            (style_name, style_config)
         }),
     );
 
