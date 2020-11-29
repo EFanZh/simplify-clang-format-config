@@ -1,6 +1,6 @@
 # simplify-clang-format-config
 
-Simplify your [ClangFormat](https://clang.llvm.org/docs/ClangFormat.html) configuration file.
+`simplify-clang-format-config` can be used to generate a simplified [ClangFormat](https://clang.llvm.org/docs/ClangFormat.html) configuration base on an existing configuration.
 
 ## Usage
 
