@@ -170,12 +170,12 @@ fn main() {
     let mut result = String::new();
     let language_key = Yaml::String(LANGUAGE_KEY.to_string());
 
-    for config in configs.into_vec() {
+    for mut config in configs.into_vec() {
         let mut yaml_emitter = YamlEmitter::new(&mut result);
 
         let language = config
-            .get(&language_key)
-            .and_then(Yaml::as_str)
+            .remove(&language_key)
+            .and_then(Yaml::into_string)
             .and_then(|language_value| language_value.parse().ok());
 
         let simplified_config = simplify_config(
